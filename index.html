@@ -1,0 +1,266 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FX Multi-Pair Scanner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+:root {
+  --bg:#000;
+  --panel:#0b0b0b;
+  --border:#1f2933;
+  --text:#e5e7eb;
+  --muted:#9ca3af;
+  --green:#22c55e;
+  --red:#ef4444;
+  --accent:#38bdf8;
+}
+
+body {
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:Inter,Arial,sans-serif;
+}
+
+header {
+  padding:14px 18px;
+  background:#050505;
+  border-bottom:1px solid var(--border);
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+}
+
+header h1 {
+  margin:0;
+  font-size:15px;
+  color:var(--accent);
+}
+
+.controls {
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+select {
+  background:#000;
+  color:var(--text);
+  border:1px solid var(--border);
+  padding:6px 8px;
+  border-radius:6px;
+  font-size:13px;
+}
+
+.status {
+  font-size:12px;
+  color:var(--muted);
+}
+
+.container {
+  padding:14px;
+  max-width:1000px;
+  margin:auto;
+}
+
+table {
+  width:100%;
+  border-collapse:collapse;
+  font-size:13px;
+}
+
+thead {
+  background:#050505;
+}
+
+th, td {
+  padding:10px;
+  text-align:center;
+  border-bottom:1px solid var(--border);
+}
+
+th {
+  color:var(--muted);
+  font-weight:500;
+}
+
+tr:hover {
+  background:#0f0f0f;
+}
+
+.buy { color:var(--green); font-weight:bold; }
+.sell { color:var(--red); font-weight:bold; }
+.wait { color:var(--muted); }
+
+.footer {
+  margin-top:12px;
+  font-size:11px;
+  color:var(--muted);
+  text-align:center;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>📡 FX Scanner</h1>
+
+  <div class="controls">
+    <select id="timeframe">
+      <option value="5min">M5</option>
+      <option value="15min" selected>M15</option>
+      <option value="30min">M30</option>
+      <option value="60min">H1</option>
+    </select>
+    <div class="status" id="status">Initializing…</div>
+  </div>
+</header>
+
+<div class="container">
+  <table>
+    <thead>
+      <tr>
+        <th>Pair</th>
+        <th>Price</th>
+        <th>RSI(14)</th>
+        <th>Signal</th>
+        <th>Reason</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody id="scanner"></tbody>
+  </table>
+
+  <div class="footer">
+    Personal Trading Scanner • Multi-Timeframe
+  </div>
+</div>
+
+<script>
+// ================= CONFIG =================
+const API_KEY = "TARH36AAQR4DS0T1";
+
+const PAIRS = [
+  { from:"EUR", to:"USD" },
+  { from:"GBP", to:"USD" },
+  { from:"USD", to:"JPY" },
+  { from:"AUD", to:"USD" },
+  { from:"USD", to:"CAD" }
+];
+
+const RSI_BUY = 30;
+const RSI_SELL = 70;
+
+// ================= STATE =================
+let scanTimer = null;
+
+// ================= UTILITIES =================
+function calcRSI(prices) {
+  let gain = 0, loss = 0;
+  for (let i = prices.length - 15; i < prices.length - 1; i++) {
+    const diff = prices[i+1] - prices[i];
+    diff >= 0 ? gain += diff : loss -= diff;
+  }
+  const rs = gain / (loss || 1);
+  return 100 - (100 / (1 + rs));
+}
+
+function timeNow() {
+  return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+
+// ================= FETCH & SIGNAL =================
+async function scanPair(pair, interval) {
+  const url = `https://www.alphavantage.co/query?function=FX_INTRADAY&from_symbol=${pair.from}&to_symbol=${pair.to}&interval=${interval}&outputsize=compact&apikey=${API_KEY}`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+  const series = data[`Time Series FX (${interval})`];
+  if (!series) return null;
+
+  const closes = Object.keys(series).reverse().map(
+    t => parseFloat(series[t]["4. close"])
+  );
+
+  if (closes.length < 20) return null;
+
+  const price = closes.at(-1);
+  const rsi = calcRSI(closes);
+
+  let signal = "WAIT";
+  let reason = "RSI neutral";
+
+  if (rsi <= RSI_BUY) {
+    signal = "BUY";
+    reason = "RSI oversold";
+  } else if (rsi >= RSI_SELL) {
+    signal = "SELL";
+    reason = "RSI overbought";
+  }
+
+  return {
+    pair: pair.from + pair.to,
+    price: price.toFixed(5),
+    rsi: rsi.toFixed(1),
+    signal,
+    reason,
+    time: timeNow()
+  };
+}
+
+// ================= SCANNER =================
+async function runScanner() {
+  const interval = document.getElementById("timeframe").value;
+  document.getElementById("status").textContent = `Scanning (${interval})…`;
+
+  const tbody = document.getElementById("scanner");
+  tbody.innerHTML = "";
+
+  for (const p of PAIRS) {
+    const r = await scanPair(p, interval);
+    if (!r) continue;
+
+    const cls = r.signal === "BUY" ? "buy" :
+                r.signal === "SELL" ? "sell" : "wait";
+
+    tbody.insertAdjacentHTML("beforeend", `
+      <tr>
+        <td>${r.pair}</td>
+        <td>${r.price}</td>
+        <td>${r.rsi}</td>
+        <td class="${cls}">${r.signal}</td>
+        <td>${r.reason}</td>
+        <td>${r.time}</td>
+      </tr>
+    `);
+  }
+
+  document.getElementById("status").textContent =
+    `Active • ${interval.toUpperCase()} • Last scan ${timeNow()}`;
+}
+
+// ================= TIMEFRAME HANDLING =================
+function resetScanner() {
+  if (scanTimer) clearInterval(scanTimer);
+
+  runScanner();
+
+  const interval = document.getElementById("timeframe").value;
+  const minutes = parseInt(interval);
+
+  scanTimer = setInterval(runScanner, minutes * 60 * 1000);
+}
+
+document.getElementById("timeframe").addEventListener("change", resetScanner);
+
+// Initial start
+resetScanner();
+</script>
+
+</body>
+</html>
