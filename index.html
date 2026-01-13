@@ -253,14 +253,5 @@ function resetScanner() {
   const interval = document.getElementById("timeframe").value;
   const minutes = parseInt(interval);
 
-  scanTimer = setInterval(runScanner, minutes * 60 * 1000);
-}
+  scanTimer = 
 
-document.getElementById("timeframe").addEventListener("change", resetScanner);
-
-// Initial start
-resetScanner();
-</script>
-
-</body>
-</html>
